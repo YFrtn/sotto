@@ -49,10 +49,21 @@ final class AudioRecorder: @unchecked Sendable {
             let count = Int(buffer.frameLength)
             guard count > 0 else { return }
 
+            // 1. Проверяем статус (на паузе мы или нет)
+            self.lock.lock()
+            let currentlyRecording = self.isRecording
+            self.lock.unlock()
+
+            // Если мы на паузе - сбрасываем эквалайзер в ноль и игнорируем поступающий звук
+            guard currentlyRecording else {
+                self.onLevel?(0)
+                return
+            }
+
             // Take first channel only
             let bufferPointer = UnsafeBufferPointer(start: channelData[0], count: count)
 
-            // Compute RMS level
+            // Compute RMS level (для анимации эквалайзера)
             if let onLevel = self.onLevel {
                 var sumOfSquares: Float = 0
                 for sample in bufferPointer {
@@ -64,6 +75,7 @@ final class AudioRecorder: @unchecked Sendable {
                 onLevel(normalized)
             }
 
+            // 2. Добавляем звук в буфер
             self.lock.lock()
             if self.isRecording {
                 let maxNativeSamples = Int(self.nativeSampleRate * self.maximumDuration)
@@ -84,6 +96,21 @@ final class AudioRecorder: @unchecked Sendable {
         }
 
         try engine.start()
+    }
+
+    /// Ставит запись на паузу (останавливает сбор данных, но не удаляет их)
+    func pause() {
+        lock.lock()
+        isRecording = false
+        lock.unlock()
+        onLevel?(0) // Мгновенно обнуляем эквалайзер
+    }
+
+    /// Возобновляет сбор звука в тот же массив
+    func resume() {
+        lock.lock()
+        isRecording = true
+        lock.unlock()
     }
 
     /// Stop recording and return the captured audio samples resampled to 16kHz mono float32.

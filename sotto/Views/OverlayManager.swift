@@ -1,14 +1,19 @@
 import AppKit
 import SwiftUI
 
-/// Manages the lifecycle of the floating recording indicator panel.
+/// Управляет жизненным циклом плавающей панели записи.
 @MainActor
 final class OverlayManager {
     private var panel: FloatingPanel<RecordingOverlayView>?
     private var isPresented = false
-    private let overlaySize = CGSize(width: RecordingOverlayView.circleDiameter, height: RecordingOverlayView.circleDiameter)
+    private let overlaySize = CGSize(width: 250, height: 75) // Оптимальный размер
 
-    func show(appState: AppState) {
+    func show(
+        appState: AppState,
+        onPauseResume: @escaping () -> Void,
+        onStopAndTranscribe: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         if panel == nil {
             let binding = Binding<Bool>(
                 get: { [weak self] in
@@ -26,16 +31,29 @@ final class OverlayManager {
             let contentRect = NSRect(origin: .zero, size: overlaySize)
             let newPanel = FloatingPanel(
                 view: {
-                    RecordingOverlayView(appState: appState)
+                    RecordingOverlayView(
+                        appState: appState,
+                        onPauseResume: onPauseResume,
+                        onStopAndTranscribe: onStopAndTranscribe,
+                        onCancel: onCancel
+                    )
                 },
                 contentRect: contentRect,
                 isPresented: binding
             )
+            
+            newPanel.ignoresMouseEvents = false
+            newPanel.isMovableByWindowBackground = true // Включаем плавное перетаскивание за фон
             newPanel.positionBottomCenter()
             panel = newPanel
         } else {
             panel?.updateView {
-                RecordingOverlayView(appState: appState)
+                RecordingOverlayView(
+                    appState: appState,
+                    onPauseResume: onPauseResume,
+                    onStopAndTranscribe: onStopAndTranscribe,
+                    onCancel: onCancel
+                )
             }
         }
 

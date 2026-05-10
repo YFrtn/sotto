@@ -1,13 +1,13 @@
 //
-//  whisperUITestsLaunchTests.swift
-//  whisperUITests
+//  sottoUITestsLaunchTests.swift
+//  sottoUITests
 //
 //  Created by Marko Simic on 13-02-2026.
 //
 
 import XCTest
 
-final class whisperUITestsLaunchTests: XCTestCase {
+final class sottoUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

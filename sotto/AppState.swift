@@ -6,6 +6,7 @@ enum AppPhase: Equatable {
     case idle
     case loading(String) // loading model, message
     case recording
+    case paused // НОВОЕ СОСТОЯНИЕ: Запись на паузе
     case transcribing
     case pasting
     case error(String)
@@ -15,6 +16,7 @@ private enum AppPhaseKind: Equatable {
     case idle
     case loading
     case recording
+    case paused // НОВОЕ СОСТОЯНИЕ
     case transcribing
     case pasting
     case error
@@ -29,6 +31,8 @@ private extension AppPhase {
             return .loading
         case .recording:
             return .recording
+        case .paused:
+            return .paused
         case .transcribing:
             return .transcribing
         case .pasting:
@@ -63,6 +67,8 @@ final class AppState {
             return msg
         case .recording:
             return "Recording..."
+        case .paused:
+            return "Paused..." // Текст для паузы
         case .transcribing:
             return "Transcribing..."
         case .pasting:
@@ -91,34 +97,36 @@ final class AppState {
     var menuStatusLabel: String {
         switch phase {
         case .recording:
-            return "Whisper Recording"
+            return "Sotto Recording"
+        case .paused:
+            return "Sotto Paused" // Текст для меню
         case .transcribing:
-            return "Whisper Transcribing"
+            return "Sotto Transcribing"
         case .pasting:
-            return "Whisper Pasting"
+            return "Sotto Pasting"
         case .loading:
             switch modelStatus {
             case .downloading:
-                return "Whisper Downloading"
+                return "Sotto Downloading"
             case .loading:
-                return "Whisper Initializing"
+                return "Sotto Initializing"
             default:
-                return "Whisper Loading"
+                return "Sotto Loading"
             }
         case .error:
-            return "Whisper Error"
+            return "Sotto Error"
         case .idle:
             switch modelStatus {
             case .loaded where hasRequiredPermissions:
-                return "Whisper Ready"
+                return "Sotto Ready"
             case .loaded:
-                return "Whisper Needs Permission"
+                return "Sotto Needs Permission"
             case .error:
                 return "Model Error"
             case .notLoaded where downloadedModelRepoIDs.isEmpty:
                 return "No Local Models"
             default:
-                return "Whisper Loading"
+                return "Sotto Loading"
             }
         }
     }
@@ -127,6 +135,8 @@ final class AppState {
         switch phase {
         case .recording:
             return .red
+        case .paused:
+            return .yellow // Цвет паузы
         case .transcribing, .pasting:
             return .blue
         case .error:
@@ -166,8 +176,12 @@ final class AppState {
             default:
                 return "arrow.right.circle"
             }
-        case .recording, .transcribing, .pasting:
+        case .recording:
             return "waveform.circle.fill"
+        case .paused:
+            return "pause.circle" // Иконка в статус-баре Mac
+        case .transcribing, .pasting:
+            return "waveform.circle.fill" // Можно заменить на hourglass, если хочется
         case .error:
             return "exclamationmark.triangle"
         }
@@ -225,7 +239,10 @@ final class AppState {
         case .loading:
             return next == .idle || next == .loading
         case .recording:
-            return next == .transcribing || next == .idle
+            return next == .paused || next == .transcribing || next == .idle
+        case .paused:
+            // Из паузы можно вернуться в запись, начать транскрибацию или отменить
+            return next == .recording || next == .transcribing || next == .idle
         case .transcribing:
             return next == .pasting || next == .idle
         case .pasting:

@@ -14,17 +14,17 @@ actor TranscriptionService {
     private var currentRepoID: String?
 
     /// Guards stale completions for actor-owned model state.
-    /// Kept separate from `WhisperApp.modelLoadGeneration`, which protects UI updates.
+    /// Kept separate from `SottoApp.modelLoadGeneration`, which protects UI updates.
     private var loadGeneration: UInt64 = 0
 
     private var hasActiveOperation = false
     private var waitingOperations: [CheckedContinuation<Void, Never>] = []
     private static let cacheInspectionQueue = DispatchQueue(
-        label: "shoki.whisper.transcription.cache-inspection",
+        label: "com.yfrtn.sotto.transcription.cache-inspection",
         qos: .utility
     )
     private let inferenceQueue = DispatchQueue(
-        label: "shoki.whisper.transcription.inference",
+        label: "com.yfrtn.sotto.transcription.inference",
         qos: .userInitiated
     )
 
@@ -261,9 +261,13 @@ actor TranscriptionService {
         return await withCheckedContinuation { continuation in
             inferenceQueue.async {
                 let mlxAudio = MLXArray(request.audio)
+                
+                // Читаем выбранный язык из системных настроек приложения (по умолчанию Русский)
+                let currentLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "Russian"
+                
                 let output = request.model.generate(
                     audio: mlxAudio,
-                    language: "English"
+                    language: currentLanguage
                 )
                 let text = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 continuation.resume(returning: text)

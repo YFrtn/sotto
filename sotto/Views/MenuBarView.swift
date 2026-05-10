@@ -2,6 +2,7 @@ import SwiftUI
 
 /// The dropdown content shown when clicking the menu bar icon.
 struct MenuBarView: View {
+    @AppStorage("selectedLanguage") private var selectedLanguage = "Russian"
     @Bindable var appState: AppState
     var onModelSelect: (STTModelDefinition) -> Void
     var onDeleteLocalModel: (STTModelDefinition) -> Void
@@ -18,7 +19,8 @@ struct MenuBarView: View {
     @State private var hoveredDownloadModelID: String?
     @State private var isHoveringRunOnStartup = false
     @State private var isHoveringQuit = false
-    private let infoLabelWidth: CGFloat = 94
+    // Вернули ширину лейблов для аккуратного выравнивания
+    private let infoLabelWidth: CGFloat = 110
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -40,7 +42,9 @@ struct MenuBarView: View {
             quitSection
         }
         .padding(10)
-        .frame(width: 300)
+        // Немного увеличили ширину меню, чтобы всё влезло, но не было слишком широким
+        .frame(width: 320)
+        // ❌ Убрали .background(Material.ultraThin)
     }
 
     @ViewBuilder
@@ -66,7 +70,7 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var modelSection: some View {
-        Text("Model")
+        Text("Модель нейросети")
             .font(.system(.caption))
             .foregroundStyle(.secondary)
 
@@ -126,7 +130,7 @@ struct MenuBarView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isModelInteractionDisabled)
-                    .help("Delete local model files")
+                    .help("Удалить файлы локальной модели")
                     .onHover { isHovering in
                         if isHovering {
                             hoveredDeleteModelID = model.repoID
@@ -149,7 +153,7 @@ struct MenuBarView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isModelInteractionDisabled)
-                    .help("Download model")
+                    .help("Скачать модель")
                     .onHover { isHovering in
                         if isHovering {
                             hoveredDownloadModelID = model.repoID
@@ -165,11 +169,22 @@ struct MenuBarView: View {
     @ViewBuilder
     private var infoSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            infoRow(label: "Push to Talk") {
-                Picker("Push to Talk", selection: hotkeySelectionBinding) {
+            infoRow(label: "Хоткей записи") {
+                Picker("Хоткей записи", selection: hotkeySelectionBinding) {
                     ForEach(ModifierHotkeyPreset.allCases) { preset in
                         Text(preset.displayLabel).tag(preset)
                     }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 165, alignment: .trailing)
+                .disabled(appState.phase != .idle)
+            }
+
+            infoRow(label: "Язык диктовки") {
+                Picker("Язык диктовки", selection: $selectedLanguage) {
+                    Text("Русский").tag("Russian")
+                    Text("English").tag("English")
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
@@ -184,8 +199,8 @@ struct MenuBarView: View {
                     .padding(.horizontal, 6)
             }
 
-            permissionRow("Mic", status: appState.microphonePermission)
-            permissionRow("Accessibility", status: appState.accessibilityPermission)
+            permissionRow("Микрофон", status: appState.microphonePermission)
+            permissionRow("Универсальный доступ", status: appState.accessibilityPermission)
 
             if !appState.hasRequiredPermissions {
                 permissionActionsSection
@@ -197,20 +212,20 @@ struct MenuBarView: View {
     private var permissionActionsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             if appState.microphonePermission != .granted {
-                Button(appState.microphonePermission == .denied ? "Open Microphone Settings" : "Request Microphone Access") {
+                Button(appState.microphonePermission == .denied ? "Открыть настройки микрофона" : "Разрешить доступ к микрофону") {
                     onRequestMicrophonePermission()
                 }
                 .font(.system(.caption, weight: .medium))
             }
 
             if appState.accessibilityPermission != .granted {
-                Button("Open Accessibility Settings") {
+                Button("Настройки универсального доступа") {
                     onRequestAccessibilityPermission()
                 }
                 .font(.system(.caption, weight: .medium))
             }
 
-            Button("Re-check Permissions") {
+            Button("Проверить разрешения заново") {
                 onRecheckPermissions()
             }
             .font(.system(.caption, weight: .medium))
@@ -231,7 +246,7 @@ struct MenuBarView: View {
                             .font(.system(.caption, weight: .semibold))
                             .foregroundStyle(.green)
                     }
-                    Text("Run on Startup")
+                    Text("Автозагрузка при старте Mac")
                         .font(.system(.body))
                     Spacer()
                 }
@@ -266,7 +281,7 @@ struct MenuBarView: View {
             HStack(spacing: 6) {
                 Image(systemName: "power")
                     .font(.system(.caption))
-                Text("Quit Whisper")
+                Text("Закрыть Sotto")
                     .font(.system(.body))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -318,11 +333,11 @@ struct MenuBarView: View {
     private func permissionLabel(for status: PermissionStatus) -> String {
         switch status {
         case .granted:
-            return "Granted"
+            return "Разрешено"
         case .unknown:
-            return "Unknown"
+            return "Неизвестно"
         case .denied:
-            return "Missing"
+            return "Нет доступа"
         }
     }
 
@@ -343,5 +358,4 @@ struct MenuBarView: View {
             return false
         }
     }
-
 }

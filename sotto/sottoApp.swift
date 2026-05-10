@@ -5,10 +5,10 @@ import ServiceManagement
 import SwiftUI
 
 @main
-struct WhisperApp: App {
+struct SottoApp: App {
     private static let sharedTranscriptionService = TranscriptionService()
     private static let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "whisper",
+        subsystem: Bundle.main.bundleIdentifier ?? "sotto",
         category: "startup"
     )
 
@@ -18,8 +18,6 @@ struct WhisperApp: App {
     private let transcriptionService = sharedTranscriptionService
     @State private var hotkeyMonitor = ModifierHotkeyMonitor()
     @State private var modelLoadTask: Task<Void, Never>?
-    // UI stale-completion guard. Kept separate from TranscriptionService.loadGeneration,
-    // which guards actor-owned model state.
     @State private var modelLoadGeneration: UInt64 = 0
     @State private var hasLaunched = false
     @State private var recordingTimeoutTask: Task<Void, Never>?
@@ -32,35 +30,15 @@ struct WhisperApp: App {
         MenuBarExtra {
             MenuBarView(
                 appState: appState,
-                onModelSelect: { model in
-                    selectModel(model)
-                },
-                onDeleteLocalModel: { model in
-                    Task { @MainActor in
-                        await deleteLocalModel(model)
-                    }
-                },
-                onHotkeyPresetSelect: { preset in
-                    updateHotkeyPreset(preset)
-                },
+                onModelSelect: { model in selectModel(model) },
+                onDeleteLocalModel: { model in Task { @MainActor in await deleteLocalModel(model) } },
+                onHotkeyPresetSelect: { preset in updateHotkeyPreset(preset) },
                 runOnStartupEnabled: appState.runOnStartupEnabled,
-                onRunOnStartupToggle: {
-                    toggleRunOnStartup()
-                },
-                onRequestMicrophonePermission: {
-                    Task { @MainActor in
-                        await requestMicrophonePermissionFromMenu()
-                    }
-                },
-                onRequestAccessibilityPermission: {
-                    requestAccessibilityPermissionFromMenu()
-                },
-                onRecheckPermissions: {
-                    refreshPermissionState()
-                },
-                onQuit: {
-                    NSApplication.shared.terminate(nil)
-                }
+                onRunOnStartupToggle: { toggleRunOnStartup() },
+                onRequestMicrophonePermission: { Task { @MainActor in await requestMicrophonePermissionFromMenu() } },
+                onRequestAccessibilityPermission: { requestAccessibilityPermissionFromMenu() },
+                onRecheckPermissions: { refreshPermissionState() },
+                onQuit: { NSApplication.shared.terminate(nil) }
             )
         } label: {
             let icon = menuBarNSImage(symbolName: appState.menuBarIcon, size: 18)
@@ -74,8 +52,6 @@ struct WhisperApp: App {
         .menuBarExtraStyle(.window)
     }
 
-    /// Create an NSImage from an SF Symbol at an exact pixel size, marked as template
-    /// so macOS handles light/dark menu bar correctly.
     private func menuBarNSImage(symbolName: String, size: CGFloat) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
@@ -94,17 +70,9 @@ struct WhisperApp: App {
         appState.selectedModelID = defaultRepoID
         syncRunOnStartupState()
         configureHotkeyFromDefaults()
-
-        // Request permissions
         await requestPermissions()
-
-        // Discover locally cached models
         await refreshDownloadedModels()
-
-        // Load model
         await loadModel(repoID: defaultRepoID)
-
-        // Start listening for hotkey events
         setupHotkey()
     }
 
@@ -118,21 +86,12 @@ struct WhisperApp: App {
         let action = shouldDisable ? "disable" : "enable"
 
         do {
-            if shouldDisable {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
-
+            if shouldDisable { try service.unregister() }
+            else { try service.register() }
             appState.runOnStartupError = nil
         } catch {
-            appState.runOnStartupError =
-                "Could not \(action) Run on Startup: \(error.localizedDescription)"
-            Self.logger.error(
-                "Run on startup toggle failed. action=\(action, privacy: .public) statusBefore=\(String(describing: statusBefore), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-            )
+            appState.runOnStartupError = "Could not \(action) Run on Startup: \(error.localizedDescription)"
         }
-
         appState.runOnStartupEnabled = isRunOnStartupEnabled(service.status)
     }
 
@@ -150,17 +109,8 @@ struct WhisperApp: App {
     @MainActor
     private func setupHotkey() {
         hotkeyMonitor.preset = appState.hotkeyPreset
-
-        hotkeyMonitor.onKeyDown = {
-            Task { @MainActor in
-                await handleKeyDown()
-            }
-        }
-        hotkeyMonitor.onKeyUp = {
-            Task { @MainActor in
-                await handleKeyUp()
-            }
-        }
+        hotkeyMonitor.onKeyDown = { Task { @MainActor in await handleHotkeyToggle() } }
+        hotkeyMonitor.onKeyUp = {}
         hotkeyMonitor.start()
     }
 
@@ -179,42 +129,64 @@ struct WhisperApp: App {
         preset.save()
     }
 
+    // ЛОГИКА ПАУЗЫ
     @MainActor
-    private func handleKeyDown() async {
-        refreshPermissionState()
-
-        guard appState.phase == .idle else { return }
-        guard appState.modelStatus == .loaded else { return }
-
-        guard appState.hasRequiredPermissions else {
-            _ = appState.transition(
-                to: .error("Missing \(appState.missingPermissionSummary). Open the menu to grant access.")
-            )
-            resetAfterDelay(seconds: 4)
-            return
-        }
-
-        _ = appState.transition(to: .recording)
-        overlayManager.show(appState: appState)
-        startRecordingTimeout()
-
-        do {
-            try audioRecorder.start { [appState] (level: Float) in
-                Task { @MainActor in
-                    appState.audioLevel = level
-                }
-            }
-        } catch {
-            cancelRecordingTimeout()
-            _ = appState.transition(to: .error(error.localizedDescription))
-            overlayManager.hide()
-            resetAfterDelay()
+    private func togglePause() {
+        if appState.phase == .recording {
+            audioRecorder.pause()
+            _ = appState.transition(to: .paused)
+        } else if appState.phase == .paused {
+            audioRecorder.resume()
+            _ = appState.transition(to: .recording)
         }
     }
 
+    // ЛОГИКА ОТМЕНЫ (СБРОС)
     @MainActor
-    private func handleKeyUp() async {
-        await stopRecordingAndTranscribe()
+    private func cancelRecording() {
+        guard appState.phase == .recording || appState.phase == .paused else { return }
+        cancelRecordingTimeout()
+        _ = audioRecorder.stop() // Выключаем микрофон, результаты игнорируем
+        appState.audioLevel = 0
+        overlayManager.hide()
+        _ = appState.transition(to: .idle)
+    }
+
+    @MainActor
+    private func handleHotkeyToggle() async {
+        refreshPermissionState()
+
+        if appState.phase == .idle {
+            guard appState.modelStatus == .loaded else { return }
+            guard appState.hasRequiredPermissions else {
+                _ = appState.transition(to: .error("Missing \(appState.missingPermissionSummary). Open the menu to grant access."))
+                resetAfterDelay(seconds: 4)
+                return
+            }
+
+            _ = appState.transition(to: .recording)
+            
+            overlayManager.show(
+                appState: appState,
+                onPauseResume: { self.togglePause() },
+                onStopAndTranscribe: { Task { await self.stopRecordingAndTranscribe() } },
+                onCancel: { self.cancelRecording() } // 👈 Привязываем крестик
+            )
+            startRecordingTimeout()
+
+            do {
+                try audioRecorder.start { [appState] (level: Float) in
+                    Task { @MainActor in appState.audioLevel = level }
+                }
+            } catch {
+                cancelRecordingTimeout()
+                _ = appState.transition(to: .error(error.localizedDescription))
+                overlayManager.hide()
+                resetAfterDelay()
+            }
+        } else if appState.phase == .recording || appState.phase == .paused {
+            await stopRecordingAndTranscribe()
+        }
     }
 
     @MainActor
@@ -223,11 +195,9 @@ struct WhisperApp: App {
         recordingTimeoutTask = Task { @MainActor in
             do {
                 try await Task.sleep(for: .seconds(Self.maxRecordingDurationSeconds))
-            } catch {
-                return
-            }
+            } catch { return }
 
-            guard appState.phase == .recording else { return }
+            guard appState.phase == .recording || appState.phase == .paused else { return }
             recordingTimeoutTask = nil
             await stopRecordingAndTranscribe(cancelTimeoutTask: false)
         }
@@ -241,11 +211,9 @@ struct WhisperApp: App {
 
     @MainActor
     private func stopRecordingAndTranscribe(cancelTimeoutTask: Bool = true) async {
-        guard appState.phase == .recording else { return }
+        guard appState.phase == .recording || appState.phase == .paused else { return }
 
-        if cancelTimeoutTask {
-            cancelRecordingTimeout()
-        }
+        if cancelTimeoutTask { cancelRecordingTimeout() }
 
         let samples = audioRecorder.stop()
         appState.audioLevel = 0
@@ -253,20 +221,25 @@ struct WhisperApp: App {
         let minimumSamples = Int(Self.minimumSpeechDurationSeconds * Self.transcriptionSampleRate)
         guard samples.count >= minimumSamples else {
             overlayManager.hide()
-            _ = appState.transition(to: .error("Recording too short. Hold the hotkey briefly and try again."))
+            _ = appState.transition(to: .error("Recording too short."))
             resetAfterDelay(seconds: 2)
             return
         }
 
         _ = appState.transition(to: .transcribing)
-        overlayManager.show(appState: appState)
+        
+        // Во время перевода кнопки отключаются
+        overlayManager.show(
+            appState: appState,
+            onPauseResume: {},
+            onStopAndTranscribe: {},
+            onCancel: {}
+        )
 
         do {
             let text = try await transcriptionService.transcribe(audio: samples)
-
             _ = appState.transition(to: .pasting)
             try await PasteController.paste(text)
-
             overlayManager.hide()
             _ = appState.transition(to: .idle)
         } catch {
@@ -277,19 +250,14 @@ struct WhisperApp: App {
     }
 
     // MARK: - Model Management
-
     @MainActor
     private func selectModel(_ model: STTModelDefinition) {
         switch appState.phase {
-        case .recording, .transcribing, .pasting:
-            return
-        default:
-            break
+        case .recording, .transcribing, .pasting: return
+        default: break
         }
-
         appState.selectedModelID = model.repoID
         UserDefaults.standard.set(model.repoID, forKey: "selectedModelID")
-
         _ = startModelLoad(repoID: model.repoID)
     }
 
@@ -308,10 +276,7 @@ struct WhisperApp: App {
     @MainActor
     private func deleteLocalModel(_ model: STTModelDefinition) async {
         let repoID = model.repoID
-
-        if appState.selectedModelID == repoID {
-            modelLoadTask?.cancel()
-        }
+        if appState.selectedModelID == repoID { modelLoadTask?.cancel() }
 
         do {
             try await transcriptionService.deleteLocalModel(repoID: repoID)
@@ -319,9 +284,7 @@ struct WhisperApp: App {
 
             if appState.selectedModelID == repoID {
                 appState.modelStatus = .notLoaded
-                if case .loading = appState.phase {
-                    _ = appState.transition(to: .idle)
-                }
+                if case .loading = appState.phase { _ = appState.transition(to: .idle) }
             }
         } catch {
             _ = appState.transition(to: .error("Failed to delete model: \(error.localizedDescription)"))
@@ -368,18 +331,11 @@ struct WhisperApp: App {
                 await MainActor.run {
                     guard generation == modelLoadGeneration else { return }
                     modelLoadTask = nil
-
-                    // Today, cancellation usually means a newer load has already started.
-                    // If this task is cancelled without a replacement load, clear loading UI.
                     switch appState.modelStatus {
-                    case .loading, .downloading:
-                        appState.modelStatus = .notLoaded
-                    default:
-                        break
+                    case .loading, .downloading: appState.modelStatus = .notLoaded
+                    default: break
                     }
-                    if case .loading = appState.phase {
-                        _ = appState.transition(to: .idle)
-                    }
+                    if case .loading = appState.phase { _ = appState.transition(to: .idle) }
                 }
             } catch {
                 await MainActor.run {
@@ -393,7 +349,6 @@ struct WhisperApp: App {
                 }
             }
         }
-
         modelLoadTask = task
         return task
     }
@@ -404,21 +359,14 @@ struct WhisperApp: App {
     private func requestPermissions() async {
         let microphoneGranted = await AudioRecorder.requestPermission()
         appState.microphonePermission = microphoneGranted ? .granted : .denied
-
-        // Accessibility (prompts user if not trusted)
-        if !PasteController.hasAccessibilityPermission {
-            PasteController.requestAccessibilityPermission()
-        }
-
-        appState.accessibilityPermission =
-            PasteController.hasAccessibilityPermission ? .granted : .denied
+        if !PasteController.hasAccessibilityPermission { PasteController.requestAccessibilityPermission() }
+        appState.accessibilityPermission = PasteController.hasAccessibilityPermission ? .granted : .denied
     }
 
     @MainActor
     private func requestMicrophonePermissionFromMenu() async {
         let granted = await AudioRecorder.requestPermission()
         refreshPermissionState()
-
         guard !granted else { return }
         openPrivacySettings(anchor: "Privacy_Microphone")
     }
@@ -427,51 +375,35 @@ struct WhisperApp: App {
     private func requestAccessibilityPermissionFromMenu() {
         PasteController.requestAccessibilityPermission()
         refreshPermissionState()
-
-        if !appState.hasAccessibilityPermission {
-            openPrivacySettings(anchor: "Privacy_Accessibility")
-        }
+        if !appState.hasAccessibilityPermission { openPrivacySettings(anchor: "Privacy_Accessibility") }
     }
 
     @MainActor
     private func refreshPermissionState() {
         appState.microphonePermission = microphonePermissionStatus()
-        appState.accessibilityPermission =
-            PasteController.hasAccessibilityPermission ? .granted : .denied
+        appState.accessibilityPermission = PasteController.hasAccessibilityPermission ? .granted : .denied
     }
 
     private func microphonePermissionStatus() -> PermissionStatus {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return .granted
-        case .denied, .restricted:
-            return .denied
-        case .notDetermined:
-            return .unknown
-        @unknown default:
-            return .denied
+        case .authorized: return .granted
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .unknown
+        @unknown default: return .denied
         }
     }
 
     private func openPrivacySettings(anchor: String) {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
-        ) else {
-            return
-        }
-
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else { return }
         NSWorkspace.shared.open(url)
     }
 
     // MARK: - Helpers
-
     @MainActor
     private func resetAfterDelay(seconds: Int = 3) {
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            if case .error = appState.phase {
-                _ = appState.transition(to: .idle)
-            }
+            if case .error = appState.phase { _ = appState.transition(to: .idle) }
         }
     }
 }

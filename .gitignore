@@ -24,4 +24,7 @@ Package.resolved
 *.ipa
 *.dSYM.zip
 *.dSYM
-whisper-*.zip
+sotto-*.zip
+
+# Claude Code session data (worktrees, transcripts, memory)
+.claude/
