@@ -114,12 +114,25 @@
 
 #### Выбор языка
 
-В меню Sotto, поле **Язык диктовки** — `Русский` или `English`. Применяется на следующей записи. Модель `Qwen3 ASR` мультиязычная, перезагрузка не требуется.
+В меню Sotto, поле **Язык диктовки** — `Русский` или `English`. Применяется на следующей записи. Модели `Qwen3 ASR` мультиязычные, перезагрузка не требуется. При выбранной **GigaAM v3** переключатель скрыт — модель распознаёт только русский.
+
+#### Какую модель выбрать
+
+| Модель | Языки | Движок | Место | Особенности |
+|---|---|---|---|---|
+| Qwen3 ASR 0.6B (8-bit) | RU + EN | MLX | ~1 GB | По умолчанию, самая лёгкая |
+| Qwen3 ASR 1.7B (8-bit) | RU + EN | MLX | ~2 GB | Точнее, медленнее |
+| Qwen3 ASR 1.7B (4-bit) | RU + EN | MLX | ~1.2 GB | Компромисс размера и точности |
+| **GigaAM v3** | только RU | gigastt (ONNX + CoreML) | ~1.2 GB | **Лучшая точность на русском** (WER ~3.5% на чистой речи), пунктуация, заглавные, числа цифрами («семнадцатое июля» → «17 июля»), очень быстрая (~0.1 RTF) |
+
+Если диктуете в основном по-русски — берите GigaAM v3. Если нужен английский — Qwen3.
+
+> При первом включении GigaAM v3 скачиваются веса (~850 MB, затем квантизация в INT8) и при первом старте сервера — модель пунктуации RuPunct (~30 MB). Всё складывается в `~/Library/Caches/gigastt/models` и удаляется кнопкой 🗑️ из меню. Дальше — полностью офлайн.
 
 #### Управление моделями
 
 В разделе **Модель нейросети**:
-- Выпадающий список с тремя моделями
+- Выпадающий список с четырьмя моделями
 - **⬇️** — скачать модель (загрузка идёт в фоне, прогресс виден в статусе)
 - **🗑️** — удалить локальную копию модели (если она занимает место)
 
@@ -133,6 +146,8 @@ Sotto требует:
 
 Если разрешения отозвали — кликните **«Проверить разрешения заново»** в меню.
 
+> ⚠️ **Если выдали Универсальный доступ, а хоткей не срабатывает** — перезапустите Sotto. Глобальный слушатель хоткея (CGEvent tap) создаётся при старте приложения, и разрешение, выданное позже, на уже запущенный экземпляр не действует.
+
 ### Архитектура
 
 ```
@@ -141,10 +156,18 @@ AppState.swift              State machine: idle / loading / recording / paused
                             / transcribing / pasting / error
 
 Services/
-  TranscriptionService      Actor с MLX-инференсом, скачивание модели и кеш
+  TranscriptionService      Actor-фасад: маршрутизация между движками (MLX / gigastt),
+                            MLX-инференс, скачивание моделей и кеш
+  GigaSTTEngine             Sidecar-движок GigaAM v3: запуск gigastt serve (loopback,
+                            порт 49876), ожидание /ready, WAV → POST /v1/transcribe,
+                            гарантированное завершение процесса при выходе
   AudioRecorder             Захват через AVAudioEngine, RMS-уровень, ресэмпл в 16 кГц
                             Поддерживает pause/resume без потери буфера
   PasteController           Snapshot/restore буфера, симуляция Cmd+V
+
+Resources/
+  gigastt                   Автономный Rust-бинарник (ONNX Runtime + CoreML),
+                            собран из github.com/ekhodzitsky/gigastt
 
 Views/
   MenuBarView               Выпадающее меню (модели, разрешения, настройки, язык)
@@ -165,8 +188,8 @@ Hotkey/
 
 | Компонент | Что |
 |---|---|
-| Speech-to-Text модель | [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) (mlx-community) |
-| ML-фреймворк | [Apple MLX](https://github.com/ml-explore/mlx-swift) |
+| Speech-to-Text модели | [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) (mlx-community) · [GigaAM v3](https://github.com/salute-developers/GigaAM) (SberDevices) |
+| ML-фреймворк | [Apple MLX](https://github.com/ml-explore/mlx-swift) · [gigastt](https://github.com/ekhodzitsky/gigastt) (ONNX Runtime + CoreML) |
 | Аудио-обвязка | [mlx-audio-swift](https://github.com/Blaizzy/mlx-audio-swift) |
 | Скачивание моделей | [swift-transformers](https://github.com/huggingface/swift-transformers) (HuggingFace Hub) |
 | UI | SwiftUI + AppKit (`NSPanel` для оверлея) |
@@ -295,12 +318,25 @@ In the Sotto menu, **Хоткей записи** (Recording hotkey) field, pick 
 
 #### Language switching
 
-In the Sotto menu, **Язык диктовки** (Dictation language) field — `Русский` or `English`. Applies to the next recording. The Qwen3 ASR model is multilingual, so no reload is needed.
+In the Sotto menu, **Язык диктовки** (Dictation language) field — `Русский` or `English`. Applies to the next recording. The Qwen3 ASR models are multilingual, so no reload is needed. When **GigaAM v3** is selected the picker is hidden — the model is Russian-only.
+
+#### Choosing a model
+
+| Model | Languages | Engine | Disk | Notes |
+|---|---|---|---|---|
+| Qwen3 ASR 0.6B (8-bit) | RU + EN | MLX | ~1 GB | Default, lightest |
+| Qwen3 ASR 1.7B (8-bit) | RU + EN | MLX | ~2 GB | More accurate, slower |
+| Qwen3 ASR 1.7B (4-bit) | RU + EN | MLX | ~1.2 GB | Size/accuracy tradeoff |
+| **GigaAM v3** | RU only | gigastt (ONNX + CoreML) | ~1.2 GB | **Best Russian accuracy** (WER ~3.5% clean speech), punctuation, casing, spoken numbers → digits, very fast (~0.1 RTF) |
+
+If you mostly dictate in Russian — pick GigaAM v3. If you need English — pick Qwen3.
+
+> On first use GigaAM v3 downloads its weights (~850 MB, then INT8-quantized) and, on the first server start, the RuPunct punctuation model (~30 MB). Everything lands in `~/Library/Caches/gigastt/models` and can be removed via the 🗑️ button. Fully offline afterwards.
 
 #### Model management
 
 Under **Модель нейросети** (Neural model):
-- Dropdown with three models
+- Dropdown with four models
 - **⬇️** — download the model (progress is shown in the status line)
 - **🗑️** — remove the local copy
 
@@ -314,6 +350,8 @@ Sotto needs:
 
 If you revoke a permission, click **«Проверить разрешения заново»** (Re-check permissions) in the menu.
 
+> ⚠️ **If you granted Accessibility but the hotkey does nothing** — restart Sotto. The global hotkey listener (CGEvent tap) is created at app launch, and a permission granted afterwards does not apply to the already-running instance.
+
 ### Architecture
 
 ```
@@ -322,10 +360,18 @@ AppState.swift              State machine: idle / loading / recording / paused
                             / transcribing / pasting / error
 
 Services/
-  TranscriptionService      Actor wrapping MLX inference, model download and cache
+  TranscriptionService      Actor façade: routes between engines (MLX / gigastt),
+                            MLX inference, model download and cache
+  GigaSTTEngine             GigaAM v3 sidecar engine: launches gigastt serve
+                            (loopback, port 49876), waits for /ready, WAV →
+                            POST /v1/transcribe, guaranteed teardown on quit
   AudioRecorder             AVAudioEngine capture, RMS level, 16 kHz resampling
                             Supports pause/resume without losing the buffer
   PasteController           Pasteboard snapshot/restore, Cmd+V simulation
+
+Resources/
+  gigastt                   Self-contained Rust binary (ONNX Runtime + CoreML),
+                            built from github.com/ekhodzitsky/gigastt
 
 Views/
   MenuBarView               Dropdown menu (models, permissions, settings, language)
@@ -346,8 +392,8 @@ Hotkey/
 
 | Component | What |
 |---|---|
-| Speech-to-text model | [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) (mlx-community) |
-| ML framework | [Apple MLX](https://github.com/ml-explore/mlx-swift) |
+| Speech-to-text models | [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) (mlx-community) · [GigaAM v3](https://github.com/salute-developers/GigaAM) (SberDevices) |
+| ML framework | [Apple MLX](https://github.com/ml-explore/mlx-swift) · [gigastt](https://github.com/ekhodzitsky/gigastt) (ONNX Runtime + CoreML) |
 | Audio bindings | [mlx-audio-swift](https://github.com/Blaizzy/mlx-audio-swift) |
 | Model download | [swift-transformers](https://github.com/huggingface/swift-transformers) (HuggingFace Hub) |
 | UI | SwiftUI + AppKit (`NSPanel` for the overlay) |
@@ -372,3 +418,9 @@ In this fork the following has been substantially reworked:
 - **Russian / English language picker**, read from `UserDefaults` on every transcription.
 - **Full Russian localization** of the menu bar UI.
 - **Bundle ID and branding** — renamed from `whisper` to `sotto`.
+- **GigaAM v3 engine** — integrated [gigastt](https://github.com/ekhodzitsky/gigastt) as a bundled sidecar server (ONNX Runtime + CoreML) for more accurate Russian recognition.
+
+Special thanks to:
+
+- [**GigaAM**](https://github.com/salute-developers/GigaAM) by SberDevices — the Russian speech recognition model
+- [**gigastt**](https://github.com/ekhodzitsky/gigastt) — the Rust engine that powers GigaAM v3 inside Sotto
