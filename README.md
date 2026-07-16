@@ -23,7 +23,7 @@
 
 ### Что это
 
-**Sotto** (от итал. *sotto voce* — «вполголоса») — приложение для голосовой диктовки на macOS, которое работает **полностью на вашем компьютере**. Никаких облаков, никакой отправки звука куда-либо. Аудио → текст происходит локально через [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) на базе [Apple MLX](https://github.com/ml-explore/mlx-swift).
+**Sotto** (от итал. *sotto voce* — «вполголоса») — приложение для голосовой диктовки на macOS, которое работает **полностью на вашем компьютере**. Никаких облаков, никакой отправки звука куда-либо. Аудио → текст происходит локально: через [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) на базе [Apple MLX](https://github.com/ml-explore/mlx-swift), либо через [GigaAM v3](https://github.com/salute-developers/GigaAM) на базе встроенного [gigastt](https://github.com/ekhodzitsky/gigastt) (ONNX Runtime + CoreML) — специализированной модели для русского языка.
 
 Принцип работы простой: нажали хоткей → надиктовали → нажали ещё раз (или зелёную кнопку «Отправить») → текст автоматически вставляется в активное приложение через симуляцию `Cmd+V`.
 
@@ -37,7 +37,7 @@
 - **Двуязычная диктовка** — переключатель **Русский / English** в menu bar. Применяется к следующей записи без перезагрузки модели.
 - **Дизайн «Siri Aura»** — пилюля с угловым градиентом (синий → пурпурный → оранжевый), вращающимся со скоростью 360° за 6 секунд, и шестиполосным эквалайзером, реагирующим на громкость микрофона в реальном времени.
 - **Перетаскиваемый оверлей** — потяните пилюлю мышью, чтобы поставить её в удобное место.
-- **Три модели на выбор** — Qwen3 ASR `0.6B (8-bit)`, `1.7B (8-bit)`, `1.7B (4-bit)`. Скачиваются по требованию из HuggingFace, удаляются одной кнопкой в меню.
+- **Четыре модели на выбор** — Qwen3 ASR `0.6B (8-bit)`, `1.7B (8-bit)`, `1.7B (4-bit)` (двуязычные, MLX) и **GigaAM v3** (только русский, ONNX/CoreML — заметно точнее на русской речи, с пунктуацией и расстановкой заглавных). Скачиваются по требованию, удаляются одной кнопкой в меню.
 - **5 пресетов хоткея** — комбинации двух модификаторов с **различием левых и правых клавиш** (чтобы не пересекаться с системными шорткатами).
 - **Smart paste** — текст вставляется через `Cmd+V` симуляцией Accessibility API; оригинальный буфер обмена сохраняется и восстанавливается; пробел добавляется автоматически, если курсор стоит после непробельного символа.
 - **Автозапуск при старте Mac** — переключатель в меню (через `SMAppService`).
@@ -49,7 +49,7 @@
 - **macOS 15.0+** (Sequoia или новее)
 - **Apple Silicon** настоятельно рекомендуется — на Intel MLX работает медленно
 - Разрешения **Микрофон** и **Универсальный доступ**
-- ~1 GB свободного места на модель по умолчанию (`Qwen3 ASR 0.6B 8-bit`)
+- ~1 GB свободного места на модель по умолчанию (`Qwen3 ASR 0.6B 8-bit`); для GigaAM v3 — ~1.2 GB
 
 ### Установка
 
@@ -191,6 +191,12 @@ Hotkey/
 - **Picker языка диктовки** RU/EN, читаемый из `UserDefaults` каждой транскрибацией.
 - **Полная локализация menu bar UI** на русский.
 - **Bundle ID и брендинг** — приложение переименовано из `whisper` в `sotto`.
+- **Движок GigaAM v3** — подключён [gigastt](https://github.com/ekhodzitsky/gigastt) как встроенный sidecar-сервер (ONNX Runtime + CoreML) для более точного распознавания русского.
+
+Отдельное спасибо:
+
+- [**GigaAM**](https://github.com/salute-developers/GigaAM) от SberDevices — модель распознавания русской речи
+- [**gigastt**](https://github.com/ekhodzitsky/gigastt) — Rust-движок, через который GigaAM v3 работает в Sotto
 
 ---
 
@@ -198,7 +204,7 @@ Hotkey/
 
 ### What is Sotto
 
-**Sotto** (from Italian *sotto voce* — "in a low voice") is a macOS voice dictation app that runs **entirely on your machine**. No cloud, no audio leaves your computer. Speech-to-text happens locally via [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) on top of [Apple MLX](https://github.com/ml-explore/mlx-swift).
+**Sotto** (from Italian *sotto voce* — "in a low voice") is a macOS voice dictation app that runs **entirely on your machine**. No cloud, no audio leaves your computer. Speech-to-text happens locally: via [Qwen3 ASR](https://huggingface.co/collections/mlx-community/qwen3-audio-6848a88a82aeef3874bf1543) on top of [Apple MLX](https://github.com/ml-explore/mlx-swift), or via [GigaAM v3](https://github.com/salute-developers/GigaAM) served by the bundled [gigastt](https://github.com/ekhodzitsky/gigastt) engine (ONNX Runtime + CoreML) — a Russian-specialized model.
 
 Workflow: press a hotkey → speak → press it again (or hit the green Send button) → the transcribed text is pasted into the active application via simulated `Cmd+V`.
 
@@ -212,7 +218,7 @@ Workflow: press a hotkey → speak → press it again (or hit the green Send but
 - **Bilingual dictation** — Russian / English picker in the menu bar. Applies to the next recording without reloading the model.
 - **"Siri Aura" design** — pill overlay with an angular gradient (blue → purple → orange) rotating 360° every 6 seconds, plus a six-bar equalizer that reacts to mic level in real time.
 - **Draggable overlay** — drag the pill anywhere on screen.
-- **Three model options** — Qwen3 ASR `0.6B (8-bit)`, `1.7B (8-bit)`, `1.7B (4-bit)`. Downloaded on demand from HuggingFace, removable per-model.
+- **Four model options** — Qwen3 ASR `0.6B (8-bit)`, `1.7B (8-bit)`, `1.7B (4-bit)` (bilingual, MLX) and **GigaAM v3** (Russian-only, ONNX/CoreML — noticeably more accurate on Russian speech, with punctuation and casing). Downloaded on demand, removable per-model.
 - **5 hotkey presets** — two-modifier combinations with **left/right modifier discrimination** (so they don't clash with system shortcuts).
 - **Smart paste** — text is pasted via simulated `Cmd+V` through the Accessibility API; the original clipboard contents are preserved and restored; a leading space is added automatically when the cursor is right after a non-whitespace character.
 - **Run on startup** — toggle in the menu (uses `SMAppService`).
@@ -224,7 +230,7 @@ Workflow: press a hotkey → speak → press it again (or hit the green Send but
 - **macOS 15.0+** (Sequoia or later)
 - **Apple Silicon** strongly recommended — MLX is much slower on Intel
 - **Microphone** and **Accessibility** permissions
-- ~1 GB of free space for the default model (`Qwen3 ASR 0.6B 8-bit`)
+- ~1 GB of free space for the default model (`Qwen3 ASR 0.6B 8-bit`); ~1.2 GB for GigaAM v3
 
 ### Installation
 

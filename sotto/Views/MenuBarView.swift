@@ -182,14 +182,23 @@ struct MenuBarView: View {
             }
 
             infoRow(label: "Язык диктовки") {
-                Picker("Язык диктовки", selection: $selectedLanguage) {
-                    Text("Русский").tag("Russian")
-                    Text("English").tag("English")
+                if selectedModelSupportsLanguageSelection {
+                    Picker("Язык диктовки", selection: $selectedLanguage) {
+                        Text("Русский").tag("Russian")
+                        Text("English").tag("English")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 165, alignment: .trailing)
+                    .disabled(appState.phase != .idle)
+                } else {
+                    // GigaAM v3 распознаёт только русский — выбор языка не применим
+                    Text("Русский")
+                        .font(.system(.caption, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 165, alignment: .trailing)
+                        .help("GigaAM v3 поддерживает только русский язык")
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 165, alignment: .trailing)
-                .disabled(appState.phase != .idle)
             }
 
             if let hotkeySettingsMessage = appState.hotkeySettingsMessage {
@@ -348,6 +357,11 @@ struct MenuBarView: View {
                 onHotkeyPresetSelect(preset)
             }
         )
+    }
+
+    private var selectedModelSupportsLanguageSelection: Bool {
+        STTModelDefinition.find(repoID: appState.selectedModelID)?
+            .supportsLanguageSelection ?? true
     }
 
     private var isModelInteractionDisabled: Bool {

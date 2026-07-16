@@ -12,6 +12,10 @@ import HuggingFace
 actor TranscriptionService {
     private var model: Qwen3ASRModel?
     private var currentRepoID: String?
+    /// Sidecar engine for GigaAM v3 (Russian-only, ONNX Runtime).
+    private let gigaEngine = GigaSTTEngine()
+    /// Engine backing the currently loaded model, if any.
+    private var currentEngine: STTEngineKind?
 
     /// Guards stale completions for actor-owned model state.
     /// Kept separate from `SottoApp.modelLoadGeneration`, which protects UI updates.
@@ -41,6 +45,12 @@ actor TranscriptionService {
     func downloadedModelRepoIDs(for repoIDs: [String]) async -> Set<String> {
         var downloaded: Set<String> = []
         for repoID in repoIDs {
+            if STTModelDefinition.find(repoID: repoID)?.engine == .gigaSTT {
+                if GigaSTTEngine.isModelDownloaded() {
+                    downloaded.insert(repoID)
+                }
+                continue
+            }
             let modelDir = Self.modelDirectory(for: repoID)
             if await Self.hasCompleteModelSnapshot(at: modelDir) {
                 downloaded.insert(repoID)
@@ -60,6 +70,11 @@ actor TranscriptionService {
             invalidateLoadedModel()
         }
 
+        if STTModelDefinition.find(repoID: repoID)?.engine == .gigaSTT {
+            try await gigaEngine.deleteLocalModel()
+            return
+        }
+
         let modelDir = Self.modelDirectory(for: repoID)
         guard FileManager.default.fileExists(atPath: modelDir.path) else {
             return
@@ -68,8 +83,9 @@ actor TranscriptionService {
         try FileManager.default.removeItem(at: modelDir)
     }
 
-    /// Load a Qwen3 ASR model from a HuggingFace repo.
-    /// Downloads on first use, cached locally for subsequent launches.
+    /// Load an STT model. For MLX models this downloads safetensors from
+    /// HuggingFace and initializes Qwen3ASRModel in-process; for GigaSTT it
+    /// downloads ONNX weights and starts the sidecar server.
     func loadModel(
         repoID: String,
         updateHandler: (@MainActor @Sendable (ModelLoadUpdate) -> Void)? = nil
@@ -79,32 +95,61 @@ actor TranscriptionService {
         defer { releaseOperationTurn() }
         try Task.checkCancellation()
 
+        let engine = STTModelDefinition.find(repoID: repoID)?.engine ?? .mlx
+
         // Skip if already loaded with same model
-        if currentRepoID == repoID && model != nil {
-            return
+        if currentRepoID == repoID {
+            switch engine {
+            case .mlx where model != nil:
+                return
+            case .gigaSTT where await gigaEngine.isRunning:
+                return
+            default:
+                break
+            }
         }
 
-        // Unload previous model
+        // Unload previous model (MLX weights and/or sidecar server)
         invalidateLoadedModel()
+        await gigaEngine.stop()
         let generation = loadGeneration
 
         try Task.checkCancellation()
 
-        try await Self.ensureModelSnapshot(repoID: repoID, updateHandler: updateHandler)
+        switch engine {
+        case .gigaSTT:
+            try await gigaEngine.ensureModelDownloaded(updateHandler: updateHandler)
 
-        try Task.checkCancellation()
+            try Task.checkCancellation()
+            await updateHandler?(.initializing)
 
-        await updateHandler?(.initializing)
+            try await gigaEngine.start()
 
-        let loaded = try await Qwen3ASRModel.fromPretrained(repoID)
+            try Task.checkCancellation()
+            guard generation == loadGeneration else {
+                await gigaEngine.stop()
+                throw CancellationError()
+            }
 
-        try Task.checkCancellation()
-        guard generation == loadGeneration else {
-            throw CancellationError()
+        case .mlx:
+            try await Self.ensureModelSnapshot(repoID: repoID, updateHandler: updateHandler)
+
+            try Task.checkCancellation()
+
+            await updateHandler?(.initializing)
+
+            let loaded = try await Qwen3ASRModel.fromPretrained(repoID)
+
+            try Task.checkCancellation()
+            guard generation == loadGeneration else {
+                throw CancellationError()
+            }
+
+            model = loaded
         }
 
-        model = loaded
         currentRepoID = repoID
+        currentEngine = engine
     }
 
     /// Ensures required model files exist in the model cache directory.
@@ -206,17 +251,21 @@ actor TranscriptionService {
         defer { releaseOperationTurn() }
         try Task.checkCancellation()
 
-        guard let model else {
-            throw TranscriptionError.modelNotLoaded
-        }
-
         guard !audio.isEmpty else {
             throw TranscriptionError.emptyAudio
         }
 
-        try Task.checkCancellation()
-
-        let text = await runInference(model: model, audio: audio)
+        let text: String
+        switch currentEngine {
+        case .gigaSTT:
+            text = try await gigaEngine.transcribe(audio: audio)
+        case .mlx, nil:
+            guard let model else {
+                throw TranscriptionError.modelNotLoaded
+            }
+            try Task.checkCancellation()
+            text = await runInference(model: model, audio: audio)
+        }
 
         try Task.checkCancellation()
 
@@ -227,10 +276,16 @@ actor TranscriptionService {
         return text
     }
 
+    /// Stops the sidecar server if it is running. Called on app termination.
+    func shutdown() async {
+        await gigaEngine.stop()
+    }
+
     private func invalidateLoadedModel() {
         loadGeneration &+= 1
         model = nil
         currentRepoID = nil
+        currentEngine = nil
         Memory.clearCache()
     }
 

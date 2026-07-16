@@ -4,8 +4,16 @@ import os
 import ServiceManagement
 import SwiftUI
 
+/// Ensures the gigastt sidecar server never outlives the app.
+final class SottoAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        GigaSTTEngine.emergencyShutdown()
+    }
+}
+
 @main
 struct SottoApp: App {
+    @NSApplicationDelegateAdaptor(SottoAppDelegate.self) private var appDelegate
     private static let sharedTranscriptionService = TranscriptionService()
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "sotto",
